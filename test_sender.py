@@ -75,15 +75,15 @@ if __name__ == "__main__":
     #用户名：111@qq.com
 
     user_id = "111@qq.com"
-    role_id = 2
-    chatroom_id = 'room_196'
 
     # 连接服务器
     sio.connect(SERVER_URL, socketio_path='/socket.io/')
 
     # # 创建房间 (通过 HTTP)
 
-    result = create_room('测完这个就走', user_id)["chatroom_id"]
+    result = create_room('测完这个就走', user_id)
+    chatroom_id = result["chatroom_id"]
+    role_id = result["role_id"]
     check_in(result)
 
     # # 加入房间 (通过 Socket.IO)
