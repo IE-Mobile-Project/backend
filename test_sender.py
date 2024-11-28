@@ -79,7 +79,8 @@ if __name__ == "__main__":
     # 连接服务器
     sio.connect(SERVER_URL, socketio_path='/socket.io/')
 
-    # # 创建房间 (通过 HTTP)
+    # 创建房间 (通过 HTTP)
+    # 获取room_id和role_id
 
     result = create_room('测完这个就走', user_id)
     chatroom_id = result["chatroom_id"]
