@@ -26,7 +26,8 @@ def current_status(data):
 
 if __name__ == '__main__':
     # 用户名：222@qq.com
-    user_id = "333@qq.com"
+    user_id = "222@qq.com"
+    # 需要修改当前的roomid
     chatroom_id = 'room_148'
     sio.connect(SERVER_URL, socketio_path='/socket.io/')
 
