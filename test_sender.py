@@ -3,7 +3,7 @@ import requests
 
 # 后端地址
 # SERVER_URL = "http://10.13.234.227:8000"
-SERVER_URL = "http://10.13.254.32:8000"
+SERVER_URL = "http://10.13.130.55:8000"
 sio = socketio.Client()
 
 
@@ -82,10 +82,10 @@ if __name__ == "__main__":
     # 创建房间 (通过 HTTP)
     # 获取room_id和role_id
 
-    result = create_room('测完这个就走', user_id)
+    result = create_room('NO BUGS', user_id)
     chatroom_id = result["chatroom_id"]
     role_id = result["role_id"]
-    check_in(result)
+    check_in(chatroom_id)
 
     # # 加入房间 (通过 Socket.IO)
     # join_room(chatroom_id, user_id)
@@ -94,6 +94,6 @@ if __name__ == "__main__":
     # send_message(chatroom_id, user_id, "Hello, this is a test message!")
 
     # 运行直到手动中止
-    while input("nnd,发消息"):
+    while input("nnd,发消息\n"):
         send_message(chatroom_id, user_id, "Hello, this is a test message!")
     sio.wait()

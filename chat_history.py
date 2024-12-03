@@ -29,6 +29,7 @@ db = client["IEMS5722_project"]
 chatroom_collection = db["chatroom"]
 messages_collection = db["messages"]
 room_messages_collection = db["room_messages"]
+LLM_URL = '10.13.212.97'
 
 Max_player = 5
 Max_Round = 3
@@ -145,6 +146,7 @@ async def process_join_room(room_id: str, user_id: str):
         # await socket_manager.emit("chatroom_start", {"room_id": room_id}, to=room_id)
 
         first_player = next(user for user in chatroom["users"] if user["role_id"] == 1)
+        print("first player: "+ str(first_player))
         if first_player["user_id"] == f"llm1":
             await call_llm_api(room_id, 1)
     return {"message": "User joined", "role_id": role_id, "code":0}
@@ -159,7 +161,7 @@ async def room_status(sid, data):
     await socket_manager.enter_room(sid, room_id)
     await socket_manager.emit("current_status", {"code": 0, "status": chatroom["status"]}, to=room_id)
 
-async def process_send_message(room_id: str, user_id: str, message: str):
+async def process_send_message(room_id: str, user_id: str, message: str, sid=''):
     # 查找聊天室
     chatroom = await chatroom_collection.find_one({"chatroom_id": room_id})
     if not chatroom or chatroom["status"] != "start":
@@ -221,6 +223,23 @@ async def process_send_message(room_id: str, user_id: str, message: str):
     print("next_role_id: " + str(next_role_id))
     next_user = next((user for user in chatroom["users"] if user["role_id"] == next_role_id), None)
     print("next_user: " +  str(next_user))
+    response = {"message": "Message sent", "all_messages": updated_messages["messages"], "role_id": role_id, "last_messages": updated_messages["messages"][-1][-1]}
+    if "error" in response:
+        await socket_manager.emit("error", response["error"], to=sid)
+        return
+
+    role_id = "role_" + str(response["role_id"])
+
+    # 广播消息给房间的所有用户
+    print("-------------------------------ready to pull new message-----------------------------")
+    await socket_manager.emit("new_message", {
+        "code": 0,
+        "role_id":response["role_id"],
+        "room_id": room_id,
+        "last_messages": response["last_messages"][role_id]
+    }, to=room_id)
+
+
     if next_user["user_id"] == f"llm{next_role_id}":
         await call_llm_api(room_id, next_role_id)
 
@@ -228,19 +247,22 @@ async def process_send_message(room_id: str, user_id: str, message: str):
 
 async def call_llm_api(room_id: str, role_id:int):
     # 获取当前房间所有消息
+    print("call llm: " + str(room_id) + " -role_id=" + str(role_id))
     room_messages = await room_messages_collection.find_one({"room_id": room_id})
-    if not room_messages:
+    if (not room_messages) and role_id != 1:
+        print("error: Room messages not found by call llm api")
         return {"error": "Room messages not found"}
 
     messages_to_send = []
-    for round_messages in room_messages["messages"]:
-        for message in round_messages:
-            for role, msg in message.items():
-                if "role" in role:
-                    messages_to_send.append({
-                        "role": role,
-                        "content": msg
-                    })
+    if not room_messages:
+        for round_messages in room_messages["messages"]:
+            for message in round_messages:
+                for role, msg in message.items():
+                    if "role" in role:
+                        messages_to_send.append({
+                            "role": role,
+                            "content": msg
+                        })
 
     # LLM API 请求
 
@@ -248,7 +270,7 @@ async def call_llm_api(room_id: str, role_id:int):
 
     print("message to gpt4:" + str(messages_to_send))
     llm_response = requests.post(
-        "http://10.13.237.40:40013/v1/llm/chat",
+        f"http://{LLM_URL}:40013/v1/llm/chat",
         json={"messages": messages_to_send}
     )
 
@@ -265,18 +287,7 @@ async def send_message(sid, data):
     user_id = data["user_id"]
     message = data["message"]
 
-    response = await process_send_message(room_id, user_id, message)
-    if "error" in response:
-        await socket_manager.emit("error", response["error"], to=sid)
-        return
-
-    # 广播消息给房间的所有用户
-    print("-------------------------------ready to pull new message-----------------------------")
-    await socket_manager.emit("new_message", {
-        "room_id": room_id,
-        "message": {"role_id": response["role_id"], "message": message},
-        "last_messages": response["last_messages"]
-    }, to=room_id)
+    await process_send_message(room_id, user_id, message, sid)
 
 
 from fastapi import HTTPException
