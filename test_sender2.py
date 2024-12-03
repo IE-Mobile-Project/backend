@@ -20,21 +20,38 @@ def disconnect():
 def new_message(data):
     print("New message received:", data)
 
+@sio.on("vote_status")
+def vote_result(data):
+    print(f"vote result: {data}")
+
+@sio.on("current_status")
+def current_status(data):
+    print(f"chatroom status:{data}")
+
+@sio.on("start_voting")
+def start_vote(data):
+    print(f"current stage: {data}")
+
 if __name__ == '__main__':
-    # 用户名：333@qq.com
+    # 用户名：222@qq.com
     user_id = "333@qq.com"
-    role_id = 2
-    chatroom_id = 'room_4183'
+    # 需要修改当前的roomid
+    chatroom_id = 'room_5054'
     sio.connect(SERVER_URL, socketio_path='/socket.io/')
 
     # # 创建房间 (通过 HTTP)
-    # create_room("room_1", "creator_123")
+    # create_room("room_1", user_id)
 
     # # 加入房间 (通过 Socket.IO)
-    join_room(chatroom_id, user_id)
+    result = join_room(chatroom_id, user_id)
+    check_in(chatroom_id)
 
     # # 发送消息 (通过 Socket.IO)
     # send_message(chatroom_id, user_id, "Hello, this is a test message!")
+    while True:
+        message = input("输入消息\n")
+        if message == '1':
+            send_message(chatroom_id, user_id, "Hello, this is a test message!")
+        else:
+            vote(chatroom_id, user_id=user_id, vote='1,5')
 
-    # 运行直到手动中止
-    sio.wait()

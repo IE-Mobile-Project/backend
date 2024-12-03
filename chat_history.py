@@ -32,7 +32,7 @@ room_messages_collection = db["room_messages"]
 LLM_URL = '10.13.212.97'
 
 Max_player = 5
-Max_Round = 3
+Max_Round = 1
 
 
 @app.get("/")
@@ -77,7 +77,8 @@ async def create_chatroom(request:CreateRoomRequest):
             "chatroom_id": room_id,
             "chatroom_name": chatroom_name,
             "status": "waiting",
-            "users": [{"user_id": creator_id, "role_id": role_id}]
+            "users": [{"user_id": creator_id, "role_id": role_id}],
+            "score": []
         }
 
         try:
@@ -145,12 +146,7 @@ async def process_join_room(room_id: str, user_id: str):
         )
         # await socket_manager.emit("chatroom_start", {"room_id": room_id}, to=room_id)
 
-        first_player = next(user for user in chatroom["users"] if user["role_id"] == 1)
-        print("first player: "+ str(first_player))
-        if first_player["user_id"] == f"llm1":
-            await call_llm_api(room_id, 1)
     return {"message": "User joined", "role_id": role_id, "code":0}
-
 
 
 @socket_manager.on("check_in")
@@ -160,6 +156,11 @@ async def room_status(sid, data):
     print("current_status" + str({"code": 0, "status": chatroom["status"]}))
     await socket_manager.enter_room(sid, room_id)
     await socket_manager.emit("current_status", {"code": 0, "status": chatroom["status"]}, to=room_id)
+    if chatroom["status"] == 'start':
+        first_player = next(user for user in chatroom["users"] if user["role_id"] == 1)
+        print("first player: "+ str(first_player))
+        if first_player["user_id"] == f"llm1":
+            await call_llm_api(room_id, 1)
 
 async def process_send_message(room_id: str, user_id: str, message: str, sid=''):
     # 查找聊天室
@@ -207,10 +208,29 @@ async def process_send_message(room_id: str, user_id: str, message: str, sid='')
 
     # 检查轮次是否结束
     updated_round_messages = updated_messages["messages"][current_round-1]
+
+    response = {"message": "Message sent", "all_messages": updated_messages["messages"], "role_id": role_id,
+                "last_messages": updated_messages["messages"][-1][-1]}
+    if "error" in response:
+        await socket_manager.emit("error", response["error"], to=sid)
+        return
+
+    # 广播消息给房间的所有用户
+    print("-------------------------------ready to pull new message-----------------------------")
+    sent_role_id = f'role_{role_id}'
+    await socket_manager.emit("new_message", {
+        "code": 0,
+        "role_id": response["role_id"],
+        "room_id": room_id,
+        "last_messages": response["last_messages"][sent_role_id]
+    }, to=room_id)
+
+
     if len(updated_round_messages) == len(chatroom["users"]):  # 所有用户发完消息
         if current_round == Max_Round:  # 达到最大轮次
             await chatroom_collection.update_one({"chatroom_id": room_id}, {"$set": {"status": "voting"}})
-            await socket_manager.emit("chat rounds ended", {"room_id": room_id}, to=room_id)
+            await socket_manager.emit("current_status", {"code": 0, "status": 'voting'}, to=room_id)
+            return
         else:
             await socket_manager.emit("next_round", {"round": current_round}, to=room_id)
             await room_messages_collection.update_one(
@@ -218,32 +238,17 @@ async def process_send_message(room_id: str, user_id: str, message: str, sid='')
                 {"$push": {"messages": []}}
             )
 
-    # 检查下一个用户是否应该是llm
+    # 检查下一个用户是否是llm
     next_role_id = role_id % 5 + 1
     print("next_role_id: " + str(next_role_id))
     next_user = next((user for user in chatroom["users"] if user["role_id"] == next_role_id), None)
     print("next_user: " +  str(next_user))
-    response = {"message": "Message sent", "all_messages": updated_messages["messages"], "role_id": role_id, "last_messages": updated_messages["messages"][-1][-1]}
-    if "error" in response:
-        await socket_manager.emit("error", response["error"], to=sid)
-        return
-
-    role_id = "role_" + str(response["role_id"])
-
-    # 广播消息给房间的所有用户
-    print("-------------------------------ready to pull new message-----------------------------")
-    await socket_manager.emit("new_message", {
-        "code": 0,
-        "role_id":response["role_id"],
-        "room_id": room_id,
-        "last_messages": response["last_messages"][role_id]
-    }, to=room_id)
 
 
     if next_user["user_id"] == f"llm{next_role_id}":
         await call_llm_api(room_id, next_role_id)
 
-    return {"message": "Message sent", "all_messages": updated_messages["messages"], "role_id": role_id, "last_messages": updated_messages["messages"][-1][-1]}
+    # return {"message": "Message sent", "all_messages": updated_messages["messages"], "role_id": role_id, "last_messages": updated_messages["messages"][-1][-1]}
 
 async def call_llm_api(room_id: str, role_id:int):
     # 获取当前房间所有消息
@@ -254,7 +259,7 @@ async def call_llm_api(room_id: str, role_id:int):
         return {"error": "Room messages not found"}
 
     messages_to_send = []
-    if not room_messages:
+    try:
         for round_messages in room_messages["messages"]:
             for message in round_messages:
                 for role, msg in message.items():
@@ -263,10 +268,12 @@ async def call_llm_api(room_id: str, role_id:int):
                             "role": role,
                             "content": msg
                         })
+    except TypeError:
+        print("this is the first round")
 
     # LLM API 请求
 
-    messages_to_send.insert(0, {"role": "role_0", "content": "You are in a game named whoisllm. you should pretend to be a real human. Send a message and try not to be distinguished by other human player. You can choose topic such as 'self_introduction'/'popular video game, music or film' or any other topic. The next are other players' message, you are suggested to follow them."})
+    # messages_to_send.insert(0, {"role": "role_0", "content": "You are in a game named whoisllm. you should pretend to be a real human. Send a message and try not to be distinguished by other human player. You can choose topic such as 'self_introduction'/'popular video game, music or film' or any other topic. The nexts are other players' message."})
 
     print("message to gpt4:" + str(messages_to_send))
     llm_response = requests.post(
@@ -276,7 +283,7 @@ async def call_llm_api(room_id: str, role_id:int):
 
     if llm_response.status_code == 200:
         # 假设 LLM API 返回结果并添加到房间消息中
-        llm_message = llm_response.json().get("message", "")
+        llm_message = llm_response.json().get("reply", "")
         await process_send_message(room_id, f"llm{role_id}", llm_message)
     else:
         print(f"LLM API call failed with status code {llm_response.status_code}")
@@ -299,12 +306,51 @@ from fastapi import HTTPException
 #         raise HTTPException(status_code=400, detail=response["error"])
 #     return response
 
-@socket_manager.on("voit")
-async def voit(sid, data):
+@socket_manager.on("send_vote")
+async def vote(sid, data):
     room_id = data["room_id"]
-    role_id = data["role_id"]
-    chatroom = await chatroom_collection.find_one({"chatroom_id": room_id})
-    await socket_manager.emit("current_status", {"code": 0, "status": chatroom["status"]}, to=room_id)
+    vote = data["vote"]
+    user_id = data["user_id"]
+    print(f'----------------------------------voting stage----------------------------------')
+    print(f'{user_id} vote {vote} in {room_id}')
+    chatroom = await chatroom_collection.find_one({"chatroom_id": room_id, "status": "voting"})
+    if not chatroom:
+        result = {'code': 1, 'message': 'room not found'}
+        print(result)
+        await socket_manager.emit('error', result, to=sid)
+        return result
+
+
+    user = next((user for user in chatroom["users"] if user["user_id"] == user_id), None)
+    llms = [llm for llm in chatroom["users"] if llm["user_id"] == 'llm'+ str(llm['role_id'])]
+    if not user:
+        print({"error": "User not found in chatroom"})
+        return {"error": "User not found in chatroom"}
+    role_id = vote.split(",")
+    score = 0
+    for i in role_id:
+        for llm in llms:
+            if llm['role_id'] == int(i):
+                score += 1
+    await chatroom_collection.update_one(
+        {"chatroom_id": room_id},
+        {"$push": {"score": {"user_id": user_id, "score": score, "sid": sid}}}
+    )
+    chatroom["score"].append({"user_id": user_id, "score": score, "sid": sid})
+    print(f"chatroom score {chatroom['score']}")
+    if len(chatroom["score"]) == 3:
+        sorted_scores = sorted(chatroom["score"], key=lambda x:x['score'], reverse=True)
+        max_score = sorted_scores[0]['score']
+        # max_items = [item for item in sorted_scores if item['score'] == max_score]
+        for player in chatroom["score"]:
+            print(f"send to {player['user_id']}, score {player['score']}")
+            await socket_manager.emit("vote_status", {"code": 0, "score": player["score"], "isWinner": player["score"]==max_score}, to=player["sid"])
+        await chatroom_collection.update_one({"chatroom_id": room_id}, {"$set": {"status": "end"}})
+
+
+    # await socket_manager.emit("current_status", {"code": 0, "status": chatroom["status"]}, to=room_id)
+
+
 
 
 

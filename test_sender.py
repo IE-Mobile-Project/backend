@@ -6,7 +6,6 @@ import requests
 SERVER_URL = "http://10.13.130.55:8000"
 sio = socketio.Client()
 
-
 # Socket.IO 事件
 @sio.event
 def connect():
@@ -60,6 +59,18 @@ def send_message(room_id, user_id, message):
     sio.emit("send_message", {"room_id": room_id, "user_id": user_id, "message": message})
     print(f"User {user_id} sent message to room {room_id}: {message}")
 
+def vote(room_id, vote, user_id):
+    sio.emit("send_vote", {"room_id":room_id, "user_id":user_id, "vote":vote})
+    print(f"Vote {vote} to {room_id} from {user_id}")
+
+@sio.on("vote_status")
+def vote_result(data):
+    print(f"vote result: {data}")
+
+@sio.on("start_voting")
+def start_vote(data):
+    print(f"current stage: {data}")
+
 
 def check_in(room_id):
     sio.emit("check_in", {"room_id": room_id})
@@ -82,7 +93,7 @@ if __name__ == "__main__":
     # 创建房间 (通过 HTTP)
     # 获取room_id和role_id
 
-    result = create_room('NO BUGS', user_id)
+    result = create_room('Done', user_id)
     chatroom_id = result["chatroom_id"]
     role_id = result["role_id"]
     check_in(chatroom_id)
@@ -94,6 +105,9 @@ if __name__ == "__main__":
     # send_message(chatroom_id, user_id, "Hello, this is a test message!")
 
     # 运行直到手动中止
-    while input("nnd,发消息\n"):
-        send_message(chatroom_id, user_id, "Hello, this is a test message!")
-    sio.wait()
+    while True:
+        message = input("输入消息\n")
+        if message == '1':
+            send_message(chatroom_id, user_id, "Hello, this is a test message!")
+        else:
+            vote(chatroom_id, user_id=user_id, vote='1,2')
